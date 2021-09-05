@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>com.github.lonedev6.annotationsonsteroids</id>
-    <name>AnnotationsOnSteroids</name>
+    <name>Annotations on Steroids</name>
     <vendor>lonedev6</vendor>
 
     <!-- Product and plugin compatibility requirements -->
