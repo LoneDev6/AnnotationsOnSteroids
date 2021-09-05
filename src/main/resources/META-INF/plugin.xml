@@ -6,14 +6,29 @@
     <!-- Product and plugin compatibility requirements -->
     <!-- https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.idea</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>com.intellij.modules.java-capable</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <applicationService serviceImplementation="com.github.lonedev6.annotationsonsteroids.services.MyApplicationService"/>
-        <projectService serviceImplementation="com.github.lonedev6.annotationsonsteroids.services.MyProjectService"/>
+        <applicationService serviceImplementation="devs.beer.asteroids.services.MyApplicationService"/>
+        <projectService serviceImplementation="devs.beer.asteroids.services.MyProjectService"/>
+
+        <localInspection language="UAST" enabledByDefault="true" level="WARNING" shortName="ExpensiveApiUsage"
+                         groupBundle="messages.JvmAnalysisBundle" bundle="messages.AnnotationsOnSteroidsBundle"
+                         groupKey="jvm.inspections.group.name" key="jvm.inspections.expensive.api.usage.display.name"
+                         implementationClass="devs.beer.asteroids.ExpensiveApiUsageInspection"/>
+
+        <localInspection language="UAST" enabledByDefault="true" level="WARNING" shortName="ExpensiveTypeUsedInSignature"
+                         groupBundle="messages.JvmAnalysisBundle" bundle="messages.AnnotationsOnSteroidsBundle"
+                         groupKey="jvm.inspections.group.name" key="jvm.inspections.expensive.type.used.in.signature.display.name"
+                         implementationClass="devs.beer.asteroids.ExpensiveTypeUsedInSignatureInspection"/>
+
     </extensions>
 
     <applicationListeners>
-        <listener class="com.github.lonedev6.annotationsonsteroids.listeners.MyProjectManagerListener"
+        <listener class="devs.beer.asteroids.listeners.MyProjectManagerListener"
                   topic="com.intellij.openapi.project.ProjectManagerListener"/>
     </applicationListeners>
 </idea-plugin>

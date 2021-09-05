@@ -1,6 +1,6 @@
-package com.github.lonedev6.annotationsonsteroids.listeners
+package devs.beer.asteroids.listeners
 
-import com.github.lonedev6.annotationsonsteroids.services.MyProjectService
+import devs.beer.asteroids.services.MyProjectService
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
