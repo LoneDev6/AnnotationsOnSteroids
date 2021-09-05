@@ -1,7 +1,7 @@
-package org.jetbrains.plugins.template.services
+package com.github.lonedev6.annotationsonsteroids.services
 
+import com.github.lonedev6.annotationsonsteroids.MyBundle
 import com.intellij.openapi.project.Project
-import org.jetbrains.plugins.template.MyBundle
 
 class MyProjectService(project: Project) {
 
