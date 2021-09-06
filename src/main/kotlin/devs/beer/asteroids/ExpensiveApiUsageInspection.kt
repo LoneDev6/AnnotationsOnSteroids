@@ -1,8 +1,6 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package devs.beer.asteroids
 
-import com.intellij.analysis.JvmAnalysisBundle
-import com.intellij.codeInsight.AnnotationUtil
 import com.intellij.codeInspection.LocalInspectionTool
 import com.intellij.codeInspection.ProblemHighlightType
 import com.intellij.codeInspection.ProblemsHolder
@@ -14,7 +12,9 @@ import com.intellij.codeInspection.util.SpecialAnnotationsUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.psi.*
+import com.intellij.psi.impl.source.tree.java.PsiLiteralExpressionImpl
 import com.intellij.psi.util.PsiUtilCore
+import com.intellij.psi.util.parents
 import com.intellij.util.ArrayUtilRt
 import com.siyeh.ig.ui.ExternalizableStringSet
 import devs.beer.asteroids.AnnotatedApiUsageUtil.findAnnotatedContainingDeclaration
@@ -22,19 +22,18 @@ import devs.beer.asteroids.AnnotatedApiUsageUtil.findAnnotatedTypeUsedInDeclarat
 import org.jetbrains.uast.*
 import javax.swing.JPanel
 
+enum class MsgType {
+    SINGLE_CALL,
+    LOOPS,
+    LAMBDA
+}
 
 class ExpensiveApiUsageInspection : LocalInspectionTool() {
 
     companion object {
-
-        //TODO: refactor that crap
-        private val SCHEDULED_FOR_REMOVAL_ANNOTATION_NAME: String = ""
-
         val DEFAULT_EXPENSIVE_API_ANNOTATIONS: List<String> = listOf(
-            //
+            "asteroids.Expensive"
         )
-
-        private val knownAnnotationMessageProviders = mapOf(SCHEDULED_FOR_REMOVAL_ANNOTATION_NAME to ScheduledForRemovalMessageProvider())
     }
 
     @JvmField
@@ -56,8 +55,7 @@ class ExpensiveApiUsageInspection : LocalInspectionTool() {
                     holder,
                     myIgnoreInsideImports,
                     myIgnoreApiDeclaredInThisProject,
-                    annotations,
-                    knownAnnotationMessageProviders
+                    annotations
                 )
             )
         } else {
@@ -85,8 +83,7 @@ private class ExpensiveApiUsageProcessor(
     private val problemsHolder: ProblemsHolder,
     private val ignoreInsideImports: Boolean,
     private val ignoreApiDeclaredInThisProject: Boolean,
-    private val expensiveApiAnnotations: List<String>,
-    private val knownAnnotationMessageProviders: Map<String, ExpensiveApiUsageMessageProvider>
+    private val expensiveApiAnnotations: List<String>
 ) : ApiUsageProcessor {
 
     private companion object {
@@ -125,8 +122,8 @@ private class ExpensiveApiUsageProcessor(
     }
 
     private fun getMessageProvider(psiAnnotation: PsiAnnotation): ExpensiveApiUsageMessageProvider? {
-        val annotationName = psiAnnotation.qualifiedName ?: return null
-        return knownAnnotationMessageProviders[annotationName] ?: DefaultExpensiveApiUsageMessageProvider
+//        val annotationName = psiAnnotation.qualifiedName ?: return null
+        return DefaultExpensiveApiUsageMessageProvider
     }
 
     private fun getElementToHighlight(sourceNode: UElement): PsiElement? =
@@ -148,18 +145,89 @@ private class ExpensiveApiUsageProcessor(
         val annotatedContainingDeclaration = findAnnotatedContainingDeclaration(target, expensiveApiAnnotations, true)
         if (annotatedContainingDeclaration != null) {
             val messageProvider = getMessageProvider(annotatedContainingDeclaration.psiAnnotation) ?: return false
-            val message = if (isMethodOverriding) {
-                messageProvider.buildMessageExpensiveMethodOverridden(annotatedContainingDeclaration)
-            }
-            else {
-                messageProvider.buildMessage(annotatedContainingDeclaration)
-            }
             val elementToHighlight = getElementToHighlight(sourceNode) ?: return false
-            problemsHolder.registerProblem(elementToHighlight, message, messageProvider.problemHighlightType)
 
-            return true
+            val singleCall = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "generic", true);
+            val calledInLoops = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLoops", true)
+            val calledInLambdas = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLambdas", true)
+
+            if(calledInLoops == true)
+            {
+                    for (parent in elementToHighlight.parents) {
+                        if(parent is PsiForStatement
+                            || parent is PsiForeachStatement
+                            || parent is PsiWhileStatement
+                            || parent is PsiDoWhileStatement)
+                        {
+                            return registerProblem(
+                                elementToHighlight,
+                                messageProvider.highlightTypeLoops,
+                                isMethodOverriding,
+                                messageProvider,
+                                annotatedContainingDeclaration,
+                                MsgType.LOOPS
+                            )
+                        }
+                    }
+            }
+
+            if(calledInLambdas == true)
+            {
+                for (parent in elementToHighlight.parents) {
+                    if(parent is PsiLambdaExpression)
+                    {
+                        return registerProblem(
+                            elementToHighlight,
+                            messageProvider.highlightTypeLambdas,
+                            isMethodOverriding,
+                            messageProvider,
+                            annotatedContainingDeclaration,
+                            MsgType.LAMBDA
+                        )
+                    }
+                }
+            }
+
+            if(singleCall == true)
+                return registerProblem(
+                    elementToHighlight,
+                    messageProvider.highlightTypeSingleCall,
+                    isMethodOverriding,
+                    messageProvider,
+                    annotatedContainingDeclaration,
+                    MsgType.SINGLE_CALL
+                );
         }
         return false
+    }
+
+    private fun getAnnotationBooleanAttributeValue(
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        attributeName: String,
+        defaultVal: Boolean
+    ): Boolean? {
+        val v = annotatedContainingDeclaration.psiAnnotation.findAttributeValue(attributeName) ?: return defaultVal
+        return (v as PsiLiteralExpressionImpl).value as Boolean?
+    }
+
+    private fun registerProblem(
+        elementToHighlight: PsiElement,
+        problemHighlightType: ProblemHighlightType,
+        isMethodOverriding: Boolean,
+        messageProvider: ExpensiveApiUsageMessageProvider,
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        msgType: MsgType
+    ): Boolean {
+
+        val message = if (isMethodOverriding) {
+            messageProvider.buildMessageExpensiveMethodOverridden(annotatedContainingDeclaration, msgType)
+        }
+        else {
+            messageProvider.buildMessage(annotatedContainingDeclaration, msgType)
+        }
+
+        problemsHolder.registerProblem(elementToHighlight, message, problemHighlightType)
+        return true
     }
 
     private fun checkTargetReferencesExpensiveeTypeInSignature(target: PsiModifierListOwner, sourceNode: UElement, isMethodOverriding: Boolean) {
@@ -173,8 +241,7 @@ private class ExpensiveApiUsageProcessor(
                 val messageProvider = getMessageProvider(expensiveTypeUsedInSignature.psiAnnotation) ?: return
                 val message = messageProvider.buildMessageExpensiveTypeIsUsedInSignatureOfReferencedApi(target, expensiveTypeUsedInSignature)
                 val elementToHighlight = getElementToHighlight(sourceNode) ?: return
-                problemsHolder.registerProblem(elementToHighlight, message, messageProvider.problemHighlightType)
-
+                problemsHolder.registerProblem(elementToHighlight, message, messageProvider.highlightTypeSingleCall)
             }
         }
     }
@@ -184,39 +251,70 @@ private class ExpensiveApiUsageProcessor(
         // coming from a light PSI file, and another element would be physical PSI file, and they are not "equals()".
         return one?.containingFile?.virtualFile == two?.containingFile?.virtualFile
     }
-
 }
 
 private interface ExpensiveApiUsageMessageProvider {
 
-    val problemHighlightType: ProblemHighlightType
+    val highlightTypeSingleCall: ProblemHighlightType
+    val highlightTypeLoops: ProblemHighlightType
+    val highlightTypeLambdas: ProblemHighlightType
 
-//    @InspectionMessage
-    fun buildMessage(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String
+    fun buildMessageExpensiveMethodOverridden(
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        msgType: MsgType
+    ): String
 
-//    @InspectionMessage
-    fun buildMessageExpensiveMethodOverridden(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String
-
-//    @InspectionMessage
     fun buildMessageExpensiveTypeIsUsedInSignatureOfReferencedApi(
         referencedApi: PsiModifierListOwner,
         annotatedTypeUsedInSignature: AnnotatedContainingDeclaration
+    ): String
+
+    fun buildMessage(
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        msgType: MsgType
     ): String
 }
 
 private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessageProvider {
 
-    override val problemHighlightType
+    override val highlightTypeSingleCall
         get() = ProblemHighlightType.WEAK_WARNING
 
-    override fun buildMessageExpensiveMethodOverridden(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String =
+    override val highlightTypeLoops
+        get() = ProblemHighlightType.GENERIC_ERROR_OR_WARNING
+
+    override val highlightTypeLambdas
+        get() = ProblemHighlightType.GENERIC_ERROR_OR_WARNING
+
+    override fun buildMessageExpensiveMethodOverridden(
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        msgType: MsgType
+    ): String =
         with(annotatedContainingDeclaration) {
             if (isOwnAnnotation) {
-                AnnotationsOnSteroidsBundle.message(
-                    "jvm.inspections.expensive.api.usage.overridden.method.is.marked.expensive.itself",
-                    targetName,
-                    presentableAnnotationName
-                )
+                when (msgType) {
+                    MsgType.LOOPS -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.overridden.method.is.marked.expensive.itself.called_in_loops",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                    MsgType.LAMBDA -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.overridden.method.is.marked.expensive.itself.called_in_lambda",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                    MsgType.SINGLE_CALL -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.overridden.method.is.marked.expensive.itself",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                }
             }
             else {
                 AnnotationsOnSteroidsBundle.message(
@@ -229,14 +327,37 @@ private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessag
             }
         }
 
-    override fun buildMessage(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String =
+    override fun buildMessage(
+        annotatedContainingDeclaration: AnnotatedContainingDeclaration,
+        msgType: MsgType
+    ): String =
         with(annotatedContainingDeclaration) {
             if (isOwnAnnotation) {
-                AnnotationsOnSteroidsBundle.message(
-                    "jvm.inspections.expensive.api.usage.api.is.marked.expensive.itself",
-                    targetName,
-                    presentableAnnotationName
-                )
+                when(msgType)
+                {
+                    MsgType.LOOPS -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.api.is.marked.expensive.itself.called_in_loops",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                    MsgType.LAMBDA -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.api.is.marked.expensive.itself.called_in_lambda",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                    MsgType.SINGLE_CALL -> {
+                        AnnotationsOnSteroidsBundle.message(
+                            "jvm.inspections.expensive.api.usage.api.is.marked.expensive.itself",
+                            targetName,
+                            presentableAnnotationName
+                        )
+                    }
+                }
+
             }
             else {
                 AnnotationsOnSteroidsBundle.message(
@@ -259,77 +380,4 @@ private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessag
         annotatedTypeUsedInSignature.targetName,
         annotatedTypeUsedInSignature.presentableAnnotationName
     )
-}
-
-//TODO: dafaq?
-private class ScheduledForRemovalMessageProvider : ExpensiveApiUsageMessageProvider {
-
-    override val problemHighlightType
-        get() = ProblemHighlightType.GENERIC_ERROR
-
-    override fun buildMessageExpensiveMethodOverridden(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String {
-        val versionMessage = getVersionMessage(annotatedContainingDeclaration)
-        return with(annotatedContainingDeclaration) {
-            if (isOwnAnnotation) {
-                JvmAnalysisBundle.message(
-                    "jvm.inspections.scheduled.for.removal.method.overridden.marked.itself",
-                    targetName,
-                    versionMessage
-                )
-            }
-            else {
-                JvmAnalysisBundle.message(
-                    "jvm.inspections.scheduled.for.removal.method.overridden.declared.in.marked.api",
-                    targetName,
-                    containingDeclarationType,
-                    containingDeclarationName,
-                    versionMessage
-                )
-            }
-        }
-    }
-
-    override fun buildMessage(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String {
-        val versionMessage = getVersionMessage(annotatedContainingDeclaration)
-        return with(annotatedContainingDeclaration) {
-            if (!isOwnAnnotation) {
-                JvmAnalysisBundle.message(
-                    "jvm.inspections.scheduled.for.removal.api.is.declared.in.marked.api",
-                    targetName,
-                    containingDeclarationType,
-                    containingDeclarationName,
-                    versionMessage
-                )
-            }
-            else {
-                JvmAnalysisBundle.message(
-                    "jvm.inspections.scheduled.for.removal.api.is.marked.itself", targetName, versionMessage
-                )
-            }
-        }
-    }
-
-    override fun buildMessageExpensiveTypeIsUsedInSignatureOfReferencedApi(
-        referencedApi: PsiModifierListOwner,
-        annotatedTypeUsedInSignature: AnnotatedContainingDeclaration
-    ): String {
-        val versionMessage = getVersionMessage(annotatedTypeUsedInSignature)
-        return JvmAnalysisBundle.message(
-            "jvm.inspections.scheduled.for.removal.scheduled.for.removal.type.is.used.in.signature.of.referenced.api",
-            DeprecationInspection.getPresentableName(referencedApi),
-            annotatedTypeUsedInSignature.targetType,
-            annotatedTypeUsedInSignature.targetName,
-            versionMessage
-        )
-    }
-
-    private fun getVersionMessage(annotatedContainingDeclaration: AnnotatedContainingDeclaration): String {
-        val versionValue = AnnotationUtil.getDeclaredStringAttributeValue(annotatedContainingDeclaration.psiAnnotation, "inVersion")
-        return if (versionValue.isNullOrEmpty()) {
-            JvmAnalysisBundle.message("jvm.inspections.scheduled.for.removal.future.version")
-        }
-        else {
-            JvmAnalysisBundle.message("jvm.inspections.scheduled.for.removal.predefined.version", versionValue)
-        }
-    }
 }
