@@ -24,7 +24,7 @@ import javax.swing.JPanel
 
 enum class MsgType {
     SINGLE_CALL,
-    LOOPS,
+    LOOP,
     LAMBDA
 }
 
@@ -147,11 +147,11 @@ private class ExpensiveApiUsageProcessor(
             val messageProvider = getMessageProvider(annotatedContainingDeclaration.psiAnnotation) ?: return false
             val elementToHighlight = getElementToHighlight(sourceNode) ?: return false
 
-            val singleCall = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "generic", true);
-            val calledInLoops = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLoops", true)
-            val calledInLambdas = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLambdas", true)
+            val singleCall = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "singleCall", true);
+            val calledInLoop = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLoop", true)
+            val calledInLambda = getAnnotationBooleanAttributeValue(annotatedContainingDeclaration, "calledInLambda", true)
 
-            if(calledInLoops == true)
+            if(calledInLoop == true)
             {
                     for (parent in elementToHighlight.parents) {
                         if(parent is PsiForStatement
@@ -161,24 +161,24 @@ private class ExpensiveApiUsageProcessor(
                         {
                             return registerProblem(
                                 elementToHighlight,
-                                messageProvider.highlightTypeLoops,
+                                messageProvider.highlightTypeLoop,
                                 isMethodOverriding,
                                 messageProvider,
                                 annotatedContainingDeclaration,
-                                MsgType.LOOPS
+                                MsgType.LOOP
                             )
                         }
                     }
             }
 
-            if(calledInLambdas == true)
+            if(calledInLambda == true)
             {
                 for (parent in elementToHighlight.parents) {
                     if(parent is PsiLambdaExpression)
                     {
                         return registerProblem(
                             elementToHighlight,
-                            messageProvider.highlightTypeLambdas,
+                            messageProvider.highlightTypeLambda,
                             isMethodOverriding,
                             messageProvider,
                             annotatedContainingDeclaration,
@@ -196,7 +196,7 @@ private class ExpensiveApiUsageProcessor(
                     messageProvider,
                     annotatedContainingDeclaration,
                     MsgType.SINGLE_CALL
-                );
+                )
         }
         return false
     }
@@ -256,8 +256,8 @@ private class ExpensiveApiUsageProcessor(
 private interface ExpensiveApiUsageMessageProvider {
 
     val highlightTypeSingleCall: ProblemHighlightType
-    val highlightTypeLoops: ProblemHighlightType
-    val highlightTypeLambdas: ProblemHighlightType
+    val highlightTypeLoop: ProblemHighlightType
+    val highlightTypeLambda: ProblemHighlightType
 
     fun buildMessageExpensiveMethodOverridden(
         annotatedContainingDeclaration: AnnotatedContainingDeclaration,
@@ -280,10 +280,10 @@ private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessag
     override val highlightTypeSingleCall
         get() = ProblemHighlightType.WEAK_WARNING
 
-    override val highlightTypeLoops
+    override val highlightTypeLoop
         get() = ProblemHighlightType.GENERIC_ERROR_OR_WARNING
 
-    override val highlightTypeLambdas
+    override val highlightTypeLambda
         get() = ProblemHighlightType.GENERIC_ERROR_OR_WARNING
 
     override fun buildMessageExpensiveMethodOverridden(
@@ -293,7 +293,7 @@ private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessag
         with(annotatedContainingDeclaration) {
             if (isOwnAnnotation) {
                 when (msgType) {
-                    MsgType.LOOPS -> {
+                    MsgType.LOOP -> {
                         AnnotationsOnSteroidsBundle.message(
                             "jvm.inspections.expensive.api.usage.overridden.method.is.marked.expensive.itself.called_in_loops",
                             targetName,
@@ -335,7 +335,7 @@ private object DefaultExpensiveApiUsageMessageProvider : ExpensiveApiUsageMessag
             if (isOwnAnnotation) {
                 when(msgType)
                 {
-                    MsgType.LOOPS -> {
+                    MsgType.LOOP -> {
                         AnnotationsOnSteroidsBundle.message(
                             "jvm.inspections.expensive.api.usage.api.is.marked.expensive.itself.called_in_loops",
                             targetName,
